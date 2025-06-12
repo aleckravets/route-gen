@@ -9,45 +9,44 @@ DOMAINS = [
 ]
 
 GATEWAY = "0.0.0.0"
-
-OUTPUT_FILE = "add_routes.bat"
+SUBNET_MASK_BITS = 24
+OUTPUT_FILE = "add-routes.bat"
 
 def resolve_domain(domain):
     try:
-        addresses = socket.getaddrinfo(domain, None)
-        ip_list = {result[4][0] for result in addresses}
-        return list(ip_list)
+        return list({res[4][0] for res in socket.getaddrinfo(domain, None, proto=socket.IPPROTO_TCP) if '.' in res[4][0]})
     except socket.gaierror:
-        print(f"failed to resolve domain {domain}")
         return []
 
-def generate_routes(ip_list):
-    commands = []
-    for ip in ip_list:
-        try:
-            ip_obj = ipaddress.ip_address(ip)
-            if isinstance(ip_obj, ipaddress.IPv4Address):
-                # route add <IP> mask 255.255.255.255 <GATEWAY>
-                cmd = f"route add {ip} mask 255.255.255.255 {GATEWAY}"
-                commands.append(cmd)
-        except ValueError:
-            continue
-    return commands
+def ip_to_subnet(ip_str, mask_bits):
+    return ipaddress.IPv4Network(f"{ip_str}/{mask_bits}", strict=False)
 
 def main():
-    all_ips = []
-    for domain in DOMAINS:
-        print(f"{domain}")
-        ips = resolve_domain(domain)
-        for ip in ips:
-            print(f"{ip}")
-        all_ips.extend(ips)
+    all_ips = set()
 
-    commands = generate_routes(all_ips)
-    
+    for domain in DOMAINS:
+        ips = resolve_domain(domain)
+        print(f"{domain}:")
+        for ip in ips:
+            print(f"  {ip}")
+        all_ips.update(ips)
+
+    subnets = set()
+    for ip in all_ips:
+        try:
+            subnet = ip_to_subnet(ip, SUBNET_MASK_BITS)
+            subnets.add(subnet)
+        except ValueError:
+            continue
+
+    print("\nGenerated routes:")
     with open(OUTPUT_FILE, "w", encoding="utf-8") as f:
-        for cmd in commands:
-            f.write(cmd + "\n")
+        for subnet in sorted(subnets, key=lambda net: str(net.network_address)):
+            net_ip = subnet.network_address
+            net_mask = subnet.netmask
+            line = f"route add {net_ip} mask {net_mask} {GATEWAY}"
+            print(line)
+            f.write(line + "\n")
 
 if __name__ == "__main__":
     main()

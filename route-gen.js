@@ -1,6 +1,6 @@
 const dns = require('dns').promises;
 const fs = require('fs');
-const ip = require('ip');
+const ipaddr = require('ipaddr.js');
 
 const DOMAINS = [
   'figma.com',
@@ -13,9 +13,18 @@ const GATEWAY = '0.0.0.0';
 const SUBNET_MASK = '255.255.255.0'; // /24
 const OUTPUT_FILE = 'add-routes.bat';
 
-function getSubnet(ipAddr, maskBits = 24) {
-  const subnet = ip.subnet(ipAddr, ip.fromPrefixLen(maskBits));
-  return subnet.networkAddress;
+// Получает адрес подсети для IPv4-адреса и префикса /24
+function getSubnet(ipStr, maskBits = 24) {
+  const ip = ipaddr.parse(ipStr);
+  if (ip.kind() !== 'ipv4') throw new Error(`Unsupported IP kind: ${ip.kind()}`);
+
+  const ipBytes = ip.octets;
+  const subnetBytes = ipBytes.map((byte, index) => {
+    if (index < Math.floor(maskBits / 8)) return byte;
+    return 0;
+  });
+
+  return subnetBytes.join('.');
 }
 
 async function resolveDomain(domain) {
@@ -40,8 +49,12 @@ async function resolveDomain(domain) {
   // Группируем по подсетям /24
   const subnets = new Set();
   allIPs.forEach(ipAddr => {
-    const subnet = getSubnet(ipAddr);
-    subnets.add(subnet);
+    try {
+      const subnet = getSubnet(ipAddr);
+      subnets.add(subnet);
+    } catch (err) {
+      console.warn(`⚠️ Skipping invalid IP ${ipAddr}: ${err.message}`);
+    }
   });
 
   const lines = [];
@@ -50,5 +63,4 @@ async function resolveDomain(domain) {
   }
 
   fs.writeFileSync(OUTPUT_FILE, lines.join('\n'), 'utf8');
-
 })();
